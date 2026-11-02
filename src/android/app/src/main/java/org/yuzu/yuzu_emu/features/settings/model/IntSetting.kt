@@ -60,7 +60,7 @@ enum class IntSetting(override val key: String) : AbstractIntSetting {
     DATA_ERASE_APPLET("data_erase_applet_mode"),
     ERROR_APPLET("error_applet_mode"),
     NET_CONNECT_APPLET("net_connect_applet_mode"),
-    PLAYER_SELECT_APPLET("player_select_applet"),
+    PLAYER_SELECT_APPLET("player_select_applet_mode"),
     SWKBD_APPLET("swkbd_applet_mode"),
     MII_EDIT_APPLET("mii_edit_applet_mode"),
     WEB_APPLET("web_applet_mode"),

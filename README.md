@@ -67,6 +67,16 @@ See the [General Build Guide](docs/Build.md)
 
 For information on provided development tooling, see the [Tools directory](./tools)
 
+### Android
+
+Build the APK with:
+
+```sh
+./build-android.sh
+```
+
+This needs JDK 17 and the Android SDK (set `ANDROID_HOME`) with NDK 28.2.13676358 and CMake 3.31.5. It builds the arm64-v8a mainline flavor for Android 13 or newer and writes `artifacts/app-mainline-release.apk`, signed with the bundled debug key. The `release-binaries` workflow builds the same APK on GitHub Actions.
+
 ## Download
 
 You can download the latest releases from [here](https://github.com/Djihads80/Eglantine/releases).

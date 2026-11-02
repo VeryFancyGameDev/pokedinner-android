@@ -203,13 +203,91 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-  # Publishes both binaries as a GitHub pre-release once every platform built: on pushes to nx2
-  # and nx2-experimental, and on manual runs unless "Publish the binaries as a GitHub release" is
-  # unticked.
+  # Built outside the desktop matrix: it needs no Qt and no CMake configure step, and a failure here
+  # must not stop the desktop release from publishing. Builds the mainline flavor (arm64-v8a,
+  # Android 13+) through the Gradle project in src/android; it is signed with the bundled debug
+  # keystore unless the ANDROID_KEYSTORE_* secrets are set.
+  android:
+    name: android-arm64 apk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake build-essential ccache cmake git glslang-tools \
+            libtool nasm ninja-build pkg-config spirv-headers spirv-tools zip
+
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          set -eu
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null
+          "$sdkmanager" "platforms;android-36" "build-tools;35.0.0" \
+            "ndk;28.2.13676358" "cmake;3.31.5"
+
+      - name: Cache CPM downloads
+        uses: actions/cache@v4
+        with:
+          path: .cache/cpm
+          key: cpm-android-${{ hashFiles('cpmfile.json', 'CMakeLists.txt', 'src/**/CMakeLists.txt') }}
+          restore-keys: |
+            cpm-android-
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-android-${{ github.sha }}
+          restore-keys: |
+            ccache-android-
+
+      - name: Build APK
+        shell: bash
+        env:
+          CCACHE: 'true'
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: ./.ci/android/build.sh -t standard -b Release -DENABLE_WERROR=OFF
+
+      - name: Name the APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s artifacts/app-mainline-release.apk
+          cp artifacts/app-mainline-release.apk "eglantine-${GITHUB_SHA}-android-arm64.apk"
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: eglantine-android-arm64-${{ github.sha }}
+          path: eglantine-${{ github.sha }}-android-arm64.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  # Publishes the binaries as a GitHub pre-release once the desktop builds succeeded: on pushes to
+  # nx2 and nx2-experimental, and on manual runs unless "Publish the binaries as a GitHub release"
+  # is unticked. The APK is attached when the Android job produced one.
   release:
     name: Publish release
-    needs: build
-    if: github.event_name == 'push' || inputs.publish_release
+    needs: [build, android]
+    if: ${{ !cancelled() && needs.build.result == 'success' && (github.event_name == 'push' || inputs.publish_release) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -227,6 +305,8 @@ jobs:
           (cd "artifacts/eglantine-windows-x86_64-${GITHUB_SHA}" &&
             zip -qr "${GITHUB_WORKSPACE}/dist/eglantine-${GITHUB_SHA}-windows-x86_64.zip" .)
           cp "artifacts/eglantine-linux-x86_64-${GITHUB_SHA}/eglantine-${GITHUB_SHA}-linux-x86_64.AppImage" dist/
+          apk="artifacts/eglantine-android-arm64-${GITHUB_SHA}/eglantine-${GITHUB_SHA}-android-arm64.apk"
+          if [ -f "$apk" ]; then cp "$apk" dist/; fi
 
       - name: Create release
         shell: bash
@@ -242,4 +322,5 @@ jobs:
             --notes "Automatic build of ${GITHUB_REF_NAME} at ${GITHUB_SHA}.
 
           Windows: extract the zip and run eglantine.exe, or eden-cli.exe from a terminal.
-          Linux: make the AppImage executable (chmod +x) and run it; it bundles its libraries and needs glibc 2.39 or newer (Ubuntu 24.04, Fedora 40, Debian 13, Arch)."
+          Linux: make the AppImage executable (chmod +x) and run it; it bundles its libraries and needs glibc 2.39 or newer (Ubuntu 24.04, Fedora 40, Debian 13, Arch).
+          Android: if an APK is attached, install it on an arm64 device running Android 13 or newer with Vulkan 1.1."
